@@ -6,11 +6,32 @@ native audio.cpp with GGML; Python is used to prepare the checkpoint.
 
 Built with Fish Audio.
 
-The implementation includes the 40-layer hybrid attention/MoE backbone,
+The base model includes the 40-layer hybrid attention/MoE backbone,
 256 experts with eight selected per token, four shared enrichment layers,
 nine residual codebook layers with persistent timeline caches, and the Fish DAC
 encoder/decoder. It supports offline and streaming TTS, voice references,
 speaker and event tags in text, long-form chunking, and continuation/edit history.
+
+## Variants
+
+Both variants use `--family fish_drama3` and the same CLI and server routes.
+The loader reads layer-specific expert counts and the output-head layout from
+the checkpoint, so Drama3-small does not need a separate family.
+
+| Variant | GGUF packages | Source |
+|---|---|---|
+| Drama3 base | Q2_K, Q3_K, and Q4_K expert packages | [Jmica/Drama-3-GGUF](https://huggingface.co/Jmica/Drama-3-GGUF) |
+| Drama3-small | `fish_drama3_small_iq3_xxs`: `Drama3-small-GGUF/drama3-small-IQ3_XXS.gguf` | [pentacoxian-dev/drama3-small-GGUF](https://huggingface.co/pentacoxian-dev/drama3-small-GGUF) |
+
+Install the small variant with:
+
+```bash
+python tools/model_manager_v2.py install fish_drama3_small_iq3_xxs --models-root models
+```
+
+Use `--model models/Drama3-small-GGUF/drama3-small-IQ3_XXS.gguf` with the
+generation examples below. Base-model weight sizes and memory measurements
+in this guide do not describe the small checkpoint.
 
 ## Windows build
 
@@ -51,7 +72,7 @@ uv run --no-project --python 3.12 --with huggingface_hub hf download `
   --local-dir models\Drama-3-GGUF
 ```
 
-The model manager also lists all four packages:
+The model manager lists the base and small packages:
 
 ```powershell
 uv run --no-project --python 3.12 tools\model_manager_v2.py list | Select-String 'fish_drama3'
@@ -125,8 +146,9 @@ CPU PyTorch dependencies managed by uv and does not load weights onto a GPU.
 
 ## Generate and stream
 
-Tower decode and codebook sampling use one cached backend graph by default.
-Set `--session-option fish_drama3.device_sampling=false` to use host sampling.
+Host sampling is used by default. Set
+`--session-option fish_drama3.device_sampling=true` to enable tower decode and
+codebook sampling in one cached backend graph, or select the `cuda_perf` preset.
 Graph probability arithmetic is F32, so sampled outputs may differ from host sampling.
 
 `fish_drama3.perf_mode` defaults to `off`. The opt-in `cuda_perf` preset sets
@@ -137,14 +159,14 @@ the following defaults; explicit session options override the preset:
 | `fish_drama3.fused_moe` | `false` | `true` | Cached-decode routing and SwiGLU fusion. |
 | `fish_drama3.kv_cache_type` | `f16` | `f16` | KV storage precision, not weight precision. Set `f32` to use F32 KV storage. |
 | `fish_drama3.kv_cache_alignment` | `1` | `256` | Cached attention-prefix buckets; all history retained. |
-| `fish_drama3.device_sampling` | `true` | `true` | Cached tower decode and device sampling; existing default retained. |
+| `fish_drama3.device_sampling` | `false` | `true` | Cached tower decode and device sampling. |
 | `fish_drama3.codec_batch_frames` | `4` | `4` | Streaming codec batch ceiling; existing default retained. |
 | `fish_drama3.codec_async_decode` | `true` | `true` | Streaming AR/codec overlap; existing default retained. |
 | `fish_drama3.backbone_prefill_cache_mb` | `256` | `256` | Backbone prefill graph-cache budget in MiB; existing default retained. |
 | `fish_drama3.tower_prefill_cache_mb` | `256` | `256` | Tower prefill graph-cache budget in MiB; existing default retained. |
 
-`off` disables only the new preset optimizations, not the existing performance
-defaults listed above. `cuda_perf` leaves those existing controls unchanged.
+`off` retains the defaults listed above. Explicit session options override either
+preset, including `fish_drama3.device_sampling=false` with `cuda_perf`.
 
 Fused arithmetic and attention shapes can change sampled audio. To enable the
 combined CUDA path, add:
